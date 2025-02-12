@@ -1,0 +1,15 @@
+# Gives 1 hour for startup
+startup_timeout = 3600.0
+
+# Bind on  the unix socker with the right permissions
+bind = "unix:/run/dexapi/dexapi.socket"
+umask= 0o111
+
+# Use a keep-alive to reduce overhead
+keep_alive_timeout = 600.0
+
+# The Async UV Loop has better performances (a lot)
+worker_class = "uvloop"
+
+# We can use here a minimal value since the protocol doesn't receive POST data
+h11_max_incomplete_size = 4
