@@ -1,7 +1,7 @@
-VERSION=0.12.1
+VERSION=0.12.2
 
 #DOCKER_IMAGE=dex_api
-DOCKER_IMAGE=ghcr.io/cryptopascal31/dex_api
+DOCKER_IMAGE=ghcr.io/mercatus-kadena/dex_api
 
 .PHONY: all docker wheel clean
 
