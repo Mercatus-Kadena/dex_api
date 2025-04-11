@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 NETWORK = "mainnet"
 
-BASE_URL = os.environ.get('TOKENS_DB') or "https://raw.githubusercontent.com/CryptoPascal31/kadena_tokens/main/"
+BASE_URL = os.environ.get('TOKENS_DB') or "https://raw.githubusercontent.com/Mercatus-Kadena/kadena_tokens/main/"
 
 def default_token_symbol(token_mod):
     ns, mod = token_mod.split(".")
