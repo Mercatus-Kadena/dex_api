@@ -1,4 +1,4 @@
-VERSION=0.12.2
+VERSION=0.12.3
 
 #DOCKER_IMAGE=dex_api
 DOCKER_IMAGE=ghcr.io/mercatus-kadena/dex_api
