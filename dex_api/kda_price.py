@@ -20,7 +20,7 @@ def _from_kucoin(doc):
 
 def _to_ts(x):
     return int(x.replace(tzinfo=UTC).timestamp())
-s
+
 def _to_index(dt):
     return int((dt-START_DATE).total_seconds())//300
 
