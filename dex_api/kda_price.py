@@ -14,12 +14,23 @@ from .date_utils import FIVE_MIN, ONE_YEAR, ONE_HOUR
 logger = logging.getLogger(__name__)
 
 START_DATE = datetime.fromisoformat("2022-01-01T00:00:00.0000")
+_SWITCH_DATE = datetime.fromisoformat("2025-10-15T00:00:00.0000")
 
 def _from_kucoin(doc):
     return (datetime.utcfromtimestamp(int(doc[0])), [Decimal(x) for x in  doc[1:5]])
 
+#Gate API has a weird order => need to reorganize
+def _from_gate(doc):
+    return (datetime.utcfromtimestamp(int(doc[0])),
+            [Decimal(doc[4]),
+             Decimal(doc[3]),
+             Decimal(doc[5]),
+             Decimal(doc[2])])
+
 def _to_ts(x):
     return int(x.replace(tzinfo=UTC).timestamp())
+
+SWITCH_DATE = _to_ts(_SWITCH_DATE)
 
 def _to_index(dt):
     return int((dt-START_DATE).total_seconds())//300
@@ -69,12 +80,12 @@ def _from_index(idx):
 class KdaPriceFiveMin:
     DELTA = FIVE_MIN
     SYMBOL = "KDA-USDT"
-    SOURCE = "Kucoin 5 minute candles"
-    BATCH_SIZE = 1500
+    SOURCE = "Kucoin/ Gate.io 5 minute candles"
+    BATCH_SIZE = 1000
 
     def __init__(self, db):
         self.db = db
-        self.col = db["kucoin_price_5min_details"]
+        self.col = db["cex_price_5min_details"]
         self.cache = np.ma.masked_all((5,_to_index(datetime.utcnow()+ONE_YEAR)))
         self.default_value = 0.0
         self.last_update = None
@@ -131,41 +142,50 @@ class KdaPriceFiveMin:
         return self.cache[4, idx_start:idx_end].filled(self.default_value)
 
 
-    async def _load_from_kucoin(self, start_dt, end_dt):
-        logger.info("Updating prices from Kucoin")
+    async def _load_from_gate(self, session, start_ts):
+        params = {"interval":"5m", "currency_pair":self.SYMBOL.replace("-","_"), "from":start_ts, "limit":self.BATCH_SIZE}
+        async with session.get("https://api.gateio.ws/api/v4/spot/candlesticks", params=params) as resp:
+            raw_data = await resp.json()
+            return sorted(map(_from_gate, raw_data), key=lambda x:x[0])
+
+    async def _load_from_kucoin(self, session, start_ts):
+        params = {"type":"5min", "symbol":self.SYMBOL, "startAt":start_ts, "endAt":start_ts+self.BATCH_SIZE*300}
+        async with session.get("https://api.kucoin.com/api/v1/market/candles", params=params) as resp:
+            raw_data = await resp.json()
+            return sorted(map(_from_kucoin, raw_data["data"]), key=lambda x:x[0])
+
+
+
+    async def _load_from_exchange(self, start_dt, end_dt):
+        logger.info("Updating prices from Exchange")
         logger.debug("Update period: {!s} => {!s}".format(start_dt, end_dt))
 
         def _candle_idx(x): return (x-_to_ts(start_dt))//self.DELTA.seconds
 
-
         async with aiohttp.ClientSession() as session:
             for st in range(_to_ts(start_dt),  _to_ts(end_dt), self.BATCH_SIZE*300):
+                loader, exchange = (self._load_from_kucoin(session,st), "Kucoin") if st < SWITCH_DATE else (self._load_from_gate(session,st), "gate")
 
-                logger.info("Downloading {:d}/{:d} candles".format(_candle_idx(st), _candle_idx(_to_ts(end_dt))))
+                logger.info("Downloading {:d}/{:d} candles from {}".format(_candle_idx(st), _candle_idx(_to_ts(end_dt)), exchange))
 
-                params = {"type":"5min", "symbol":self.SYMBOL, "startAt":st, "endAt":st+self.BATCH_SIZE*300}
+                data = await loader
+                db_ops = [ReplaceOne({"ts":_ts}, {"ts":_ts, "prices":list(map(Decimal128, prices))}, upsert=True) for _ts, prices in data]
 
-                async with session.get("https://api.kucoin.com/api/v1/market/candles", params=params) as resp:
-                    raw_data = await resp.json()
-                    data = sorted(map(_from_kucoin, raw_data["data"]), key=lambda x:x[0])
-                    db_ops = [ReplaceOne({"ts":_ts}, {"ts":_ts, "prices":list(map(Decimal128, prices))}, upsert=True)
-                                for _ts, prices in data]
-                    if db_ops:
-                       await self.col.bulk_write(db_ops)
+                if db_ops:
+                    await self.col.bulk_write(db_ops)
 
-                    for _ts, prices in data:
-                        np_prices = np.array(prices, dtype=np.float64)
-                        self.cache[0:4,_to_index(_ts)] = np_prices
-                        self.cache[-1, _to_index(_ts)] = np_prices.mean()
-                        # We use the last close value as a default value.
-                        self.default_value = np_prices[1]
-                        self.last_update = _ts
-
-                    logger.debug("{:d} prices updated from Kucoin".format(len(data)))
+                for _ts, prices in data:
+                    np_prices = np.array(prices, dtype=np.float64)
+                    self.cache[0:4,_to_index(_ts)] = np_prices
+                    self.cache[-1, _to_index(_ts)] = np_prices.mean()
+                    # We use the last close value as a default value.
+                    self.default_value = np_prices[1]
+                    self.last_update = _ts
+                logger.info("{:d} prices updated from {}".format(len(data), exchange))
 
     async def update_usd_data(self):
         first_missing = np.argmax(self.cache.mask[0:,])
         logger.debug("First missing data: {!s} ( {!s} )".format(first_missing, _from_index(first_missing)))
         first_missing = max(0, first_missing-5)
 
-        await self._load_from_kucoin(_from_index(first_missing), datetime.utcnow())
+        await self._load_from_exchange(_from_index(first_missing), datetime.utcnow())

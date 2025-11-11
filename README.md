@@ -94,6 +94,13 @@ To simplify the dockerization, the configuration is done using environment varia
  - `EVENTS_DB` (default: *kadena_events*): DB name of the Events database (ie Indexer's output)
  - `TOKENS_DB` (default *https://raw.githubusercontent.com/CryptoPascal31/kadena_tokens/main/*): GH Tokens Database
 
+### KDA Price fetching
+KDA price comes from Kucoin KDA/USDT pair from 01/01/2022 to 15/10/2025. Prices are downloaded in a separate base.
+After 15/10/205, Price are download from gate.io KDA/USDT pair.
+
+However Gate.io doesn't allow to fetch data older than 1 month. So if the database is first intialized before 15/11/2025, it's OK. But if the Databse need a reinit it should be fed from Gate histories. This latter is not yet implemented
+
+
 
 ## How to run it
 
