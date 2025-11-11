@@ -102,6 +102,11 @@ class KdaPriceFiveMin:
 
         self.cache[-1,:] = self.cache[0:4,:].mean(axis=0)
 
+        # Set up the default value from the last element in DB
+        first_missing = np.argmax(self.cache.mask[0:,])
+        if first_missing:
+            self.default_value = self.cache[-1:first_missing-1]
+
         logger.info("Price cache ready")
         logger.info("Downloading KDA/USD missing data")
         await self.update_usd_data()
@@ -145,7 +150,8 @@ class KdaPriceFiveMin:
                     data = sorted(map(_from_kucoin, raw_data["data"]), key=lambda x:x[0])
                     db_ops = [ReplaceOne({"ts":_ts}, {"ts":_ts, "prices":list(map(Decimal128, prices))}, upsert=True)
                                 for _ts, prices in data]
-                    await self.col.bulk_write(db_ops)
+                    if db_ops:
+                       await self.col.bulk_write(db_ops)
 
                     for _ts, prices in data:
                         np_prices = np.array(prices, dtype=np.float64)
